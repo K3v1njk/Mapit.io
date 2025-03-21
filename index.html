@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MAPIT.IO</title>
+    <link rel="stylesheet" href="library/leaflet /leaflet.css">
+    <link rel="stylesheet" href="library/leaflet /Leaflet.label-master/dist/leaflet.label.css">
+    <script src="library/leaflet /leaflet.js"></script>
+    <script src="library/leaflet /Leaflet.label-master/dist/leaflet.label.js"></script>
+    <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+    <script src="data/countries.geojson"></script>
+    <style type="text/css">
+
+        #map {
+                height: 80vh;
+                width: 100vw;
+                margin-bottom: 20px;
+                border: 1% solid #000000;
+                border-radius: 1%;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+            }
+
+        div.controls {
+                text-align: center;
+                margin-top: 10px;
+            }
+
+        div.controls input,
+        div.controls button {
+                padding: 5px;
+                margin: 5px;
+            }
+        h1 {
+                font-family: 'Arial', sans-serif;
+                font-size: 2.5em;
+                color: #2c3e50;
+                margin-top: 10px;
+                text-align: center;
+                letter-spacing: 2px;
+                }
+        table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 10px;
+            }
+
+        th, td {
+                padding: 10px;
+                text-align: left;
+            }
+
+        thead th {
+                background-color: #000000;
+                color: #fff;
+                border-bottom: 2px solid #ccc;
+            }
+
+        tbody tr:nth-child(odd) {
+                background-color: #f9f9f9;
+            }
+
+        tbody tr:nth-child(even) {
+                background-color: #f1f1f1;
+            }
+
+        tbody tr:hover {
+                background-color: #eaeaea;
+            }
+
+        button, input {
+                font-family: 'Arial', sans-serif;
+                font-size: 1em;
+                padding: 10px 15px;
+                margin: 5px;
+                border: 1px solid #ccc;
+                border-radius: 5px;
+                transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        button {
+                background-color: #000000;
+                color: white;
+                cursor: pointer;
+        }
+
+        button:hover {
+                background-color: #34495e;
+        }
+
+        input {
+                border: 1px solid #ccc;
+                width: 300px;
+        }
+
+        input:focus {
+                border-color: #2c3e50;
+                outline: none;
+        }
+
+        #attempts-feedback {
+                font-family: 'Arial', sans-serif;
+                font-size: 1.2em;
+                color: #34495e;
+                margin-top: 15px;
+                text-align: center;
+        }
+
+        body {
+                display: flex;
+                flex-direction: column;
+                margin: 0;
+                font-family: 'Arial', sans-serif;
+        }
+
+        .container {
+                display: flex;
+                flex-direction: row;
+                justify-content: space-between;
+                padding: 20px;
+        }
+
+        #map {
+                flex: 3;
+                margin-right: 20px;
+        }
+
+        table {
+                flex: 1;
+        }
+
+
+
+
+
+    </style>
+</head>
+<body>
+    <h1 style="text-align: center;">MAPIT.io</h1>
+
+    <div style="display: flex; flex-direction: row; align-items: flex-start;">
+        <div id="map" style="flex: 3; height: 80vh; width: 70%;"></div>
+
+        <div style="flex: 1; padding: 10px;">
+            <h3>Selected Countries</h3>
+            <table id="country-table" border="1" style="width: 100%; text-align: left; border-collapse: collapse;">
+                <thead>
+                    <tr>
+                        <th>Country</th>
+                        <th id="distance-header" style="cursor: pointer;">Distance (km) &#8597;</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                </tbody>
+            </table>
+            
+        </div>
+    </div>
+
+    <div style="margin-top: 10px; text-align: center;">
+        <input id="country-input" type="text" placeholder="Type your guess here" style="padding: 5px; width: 300px;" />
+        <button id="submit-button" style="padding: 5px;">Submit</button>
+        <button id="restart-button" style="padding: 5px; margin-left: 10px;">Restart Game</button>
+    </div>
+    <p id="feedback" style="text-align: center; font-weight: bold;"></p>
+
+    <p id="attempts-feedback" style="text-align: center; font-weight: bold;">Attempts Left: 10</p>
+
+    <script>
+        let countriesLayer;
+        let clickedCountries = {};
+        let targetCountry = null;
+        let attemptsLeft = 10; 
+        var map = L.map('map').setView([43.8476, 18.3564], 13);
+
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371;
+            const dLat = ((lat2 - lat1) * Math.PI) / 180;
+            const dLon = ((lon2 - lon1) * Math.PI) / 180;
+            const a =
+                Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos((lat1 * Math.PI) / 180) *
+                Math.cos((lat2 * Math.PI) / 180) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c;
+        }
+
+        function getColor(distance) {
+            if (distance === 0) return "green";
+            const maxDistance = 20000; 
+            const ratio = Math.min(distance / maxDistance, 1);
+
+            let red, green;
+
+            if (ratio < 0.25) {
+                red = Math.floor(255 * (ratio / 0.25));
+                green = 255;
+            } else if (ratio < 0.5) {
+                red = 255;
+                green = Math.floor(255 * (1 - (ratio - 0.25) / 0.25));
+            } else if (ratio < 0.75) {
+                red = 255;
+                green = Math.floor(255 * (0.5 - (ratio - 0.5)) / 0.25);
+            } else {
+                red = 255;
+                green = 0;
+            }
+
+            return `rgb(${red}, ${green}, 0)`;
+        }
+
+        function disableClicking() {
+            countriesLayer.eachLayer(function (layer) {
+                layer.off("click");
+            });
+            console.log("Clicking on countries has been disabled.");
+        }
+
+        function selectRandomCountry(features) {
+            const randomIndex = Math.floor(Math.random() * features.length);
+            targetCountry = features[randomIndex];
+            console.log("Target Country:", targetCountry.properties.SOVEREIGNT);
+        }
+
+        function addToTable(countryName, distance) {
+            const table = document.getElementById("country-table").getElementsByTagName("tbody")[0];
+            const newRow = table.insertRow();
+
+            const countryCell = newRow.insertCell(0);
+            const distanceCell = newRow.insertCell(1);
+
+            countryCell.textContent = countryName;
+            distanceCell.textContent = distance.toFixed(2); 
+        }
+
+        function highlightFeature(e) {
+            const layer = e.target;
+
+            if (clickedCountries[layer.feature.properties.SOVEREIGNT]) return;
+
+            layer.setStyle({
+                weight: 5,
+                color: 'black',
+                fillColor: 'white',
+                fillOpacity: 0.2
+            });
+
+            if (!L.Browser.ie && !L.Browser.opera) {
+                layer.bringToFront();
+            }
+        }
+
+        function resetHighlight(e) {
+            const layer = e.target;
+            const countryName = layer.feature.properties.SOVEREIGNT;
+
+            if (!clickedCountries[countryName]) {
+                countriesLayer.resetStyle(layer);
+            }
+        }
+
+        function countriesOnEachFeature(feature, layer) {
+            layer.bindTooltip(feature.properties.SOVEREIGNT.toString(), { noHide: true });
+
+            layer.on({
+                mouseover: highlightFeature,
+                mouseout: resetHighlight,
+                click: function (e) {
+                    if (!targetCountry) return;
+
+                    const clickedCenter = turf.centerOfMass(feature).geometry.coordinates;
+                    const targetCenter = turf.centerOfMass(targetCountry).geometry.coordinates;
+
+                    const distance = calculateDistance(
+                        clickedCenter[1], clickedCenter[0],
+                        targetCenter[1], targetCenter[0]
+                    );
+
+                    const color = getColor(distance);
+
+                    layer.setStyle({
+                        fillColor: color,
+                        fillOpacity: 0.7,
+                        color: "white",
+                        weight: 2
+                    });
+
+                    clickedCountries[feature.properties.SOVEREIGNT] = color;
+
+                    addToTable(feature.properties.SOVEREIGNT, distance);
+
+                    if (distance === 0) {
+                        alert("You guessed it! The correct country is " + feature.properties.SOVEREIGNT);
+                    }
+                }
+            });
+        }
+
+        function launchConfetti() {
+            const duration = 2 * 1000; 
+            const end = Date.now() + duration;
+
+            const colors = ['#bb0000', '#ffffff'];
+
+            (function frame() {
+                confetti({
+                    particleCount: 5,
+                    angle: 60,
+                    spread: 55,
+                    origin: { x: 0 },
+                    colors: colors
+                });
+                confetti({
+                    particleCount: 5,
+                    angle: 120,
+                    spread: 55,
+                    origin: { x: 1 },
+                    colors: colors
+                });
+
+                if (Date.now() < end) {
+                    requestAnimationFrame(frame);
+                }
+            })();
+}
+
+        function countriesStyle(feature) {
+            return {
+                fillColor: 'black',
+                weight: 2,
+                opacity: 1,
+                color: 'white',
+                dashArray: '1',
+                fillOpacity: 1
+            };
+        }
+
+        document.getElementById("distance-header").addEventListener("click", function () {
+            const table = document.getElementById("country-table");
+            const tbody = table.getElementsByTagName("tbody")[0];
+            const rows = Array.from(tbody.rows);
+
+            const ascending = this.dataset.sort === "asc";
+            this.dataset.sort = ascending ? "desc" : "asc";
+
+            rows.sort((rowA, rowB) => {
+                const distanceA = parseFloat(rowA.cells[1].textContent);
+                const distanceB = parseFloat(rowB.cells[1].textContent);
+
+                return ascending ? distanceA - distanceB : distanceB - distanceA;
+            });
+
+            tbody.innerHTML = "";
+            rows.forEach(row => tbody.appendChild(row));
+        });
+
+        document.getElementById("submit-button").addEventListener("click", function () {
+            const userGuess = document.getElementById("country-input").value.trim().toLowerCase();
+
+            if (userGuess === "") {
+                document.getElementById("feedback").textContent = "Please type a guess.";
+                document.getElementById("feedback").style.color = "orange";
+                return;
+            }
+
+            if (attemptsLeft <= 0) {
+                document.getElementById("feedback").textContent = `No attempts left! The correct country is ${targetCountry.properties.SOVEREIGNT}`;
+                document.getElementById("feedback").style.color = "red";
+                return;
+            }
+
+            let found = false;
+
+            countriesLayer.eachLayer(function (layer) {
+                const countryName = layer.feature.properties.SOVEREIGNT.toLowerCase();
+
+                if (countryName === userGuess) {
+                    found = true;
+
+                    const guessedCenter = turf.centerOfMass(layer.feature).geometry.coordinates;
+                    const targetCenter = turf.centerOfMass(targetCountry).geometry.coordinates;
+
+                    const distance = calculateDistance(
+                        guessedCenter[1], guessedCenter[0],
+                        targetCenter[1], targetCenter[0]
+                    );
+
+                    const color = getColor(distance);
+
+                    layer.setStyle({
+                        fillColor: color,
+                        fillOpacity: 0.7,
+                        color: "white",
+                        weight: 2
+                    });
+
+                    addToTable(layer.feature.properties.SOVEREIGNT, distance);
+
+                    if (distance === 0) {
+                        document.getElementById("feedback").textContent = `Correct! The country is ${layer.feature.properties.SOVEREIGNT}`;
+                        document.getElementById("feedback").style.color = "green";
+                        launchConfetti();
+
+                        return;
+                    } else {
+                        document.getElementById("feedback").textContent = `Incorrect! The country you selected is ${layer.feature.properties.SOVEREIGNT}. Distance to the target: ${distance.toFixed(2)} km.`;
+                        document.getElementById("feedback").style.color = "red";
+                    }
+                }
+            });
+
+            if (!found) {
+                document.getElementById("feedback").textContent = "Country not found. Please try again.";
+                document.getElementById("feedback").style.color = "orange";
+            }
+
+            attemptsLeft--;
+            document.getElementById("attempts-feedback").textContent = `Attempts Left: ${attemptsLeft}`;
+
+            document.getElementById("country-input").value = "";
+
+            if (attemptsLeft === 0) {
+                document.getElementById("feedback").textContent = `Game Over! The country is ${layer.feature.properties.SOVEREIGNT}`;
+                document.getElementById("submit-button").disabled = true;
+            }
+        });
+
+        document.getElementById("restart-button").addEventListener("click", function () {
+            selectRandomCountry(countries.features);
+            document.getElementById("feedback").textContent = "Game restarted! Guess the new country.";
+            document.getElementById("feedback").style.color = "black";
+            document.getElementById("country-input").value = "";
+
+            attemptsLeft = 10;
+            document.getElementById("attempts-feedback").textContent = `Attempts Left: ${attemptsLeft}`;
+
+            document.getElementById("submit-button").disabled = false;
+
+            const tableBody = document.getElementById("country-table").getElementsByTagName("tbody")[0];
+            tableBody.innerHTML = "";
+
+            clickedCountries = {};
+            countriesLayer.eachLayer(function (layer) {
+                countriesLayer.resetStyle(layer);
+            });
+        });
+
+        {countriesLayer = L.geoJson(countries, {
+                    style: countriesStyle,
+                    onEachFeature: countriesOnEachFeature
+                }).addTo(map);
+            selectRandomCountry(countries.features);
+
+
+            map.fitBounds(countriesLayer.getBounds());}
+
+    </script>
+</body>
+
+</html>
